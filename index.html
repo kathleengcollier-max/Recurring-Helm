@@ -356,7 +356,7 @@ const download = (filename, data) => { const blob = new Blob([data], { type: "ap
 async function aiJSON(prompt, maxTokens = 1000) {
   const res = await fetch("/api/anthropic", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
   if (!res.ok) throw new Error("AI request failed");
   const data = await res.json();
@@ -368,7 +368,7 @@ async function aiJSON(prompt, maxTokens = 1000) {
 async function aiText(prompt, maxTokens = 700) {
   const res = await fetch("/api/anthropic", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
   if (!res.ok) throw new Error("AI request failed");
   const data = await res.json();
