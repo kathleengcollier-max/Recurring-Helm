@@ -483,8 +483,11 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = "2.3";
+const VERSION = "2.4";
 const CHANGELOG = [
+  { v: "2.4", date: "2026-08-07", items: [
+    "The Areas view now shows each task's full due date (with year), instead of only a relative label.",
+  ] },
   { v: "2.3", date: "2026-08-07", items: [
     "The Table has a new 'Next' column showing the upcoming occurrence date for recurring tasks (click the header to sort by it).",
   ] },
@@ -1152,7 +1155,7 @@ function AreasView({ tasks, onOpen, onComplete, onReschedule, onEmail, onNew, on
             <section key={area} style={{ ...S.areaCard, borderTop: `3px solid ${a.color}` }}>
               <div style={S.areaCardHead}><h2 style={S.areaCardTitle}><span style={{ ...S.dot, background: a.color }} /> {area}</h2>{!selMode && <button onClick={() => onNew(area, null)} style={S.addMini} className="helm-mini">+ Add</button>}</div>
               {a.subs.length > 0 && <div style={S.subRow}>{a.subs.map((s) => { const n = list.filter((t) => t.subArea === s).length; return <span key={s} style={S.subPill}>{s}{n ? ` ${n}` : ""}</span>; })}</div>}
-              {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showDate />)}
+              {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showFullDate />)}
             </section>
           );
         })}
