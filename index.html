@@ -483,8 +483,14 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = "2.1";
+const VERSION = "2.3";
 const CHANGELOG = [
+  { v: "2.3", date: "2026-08-07", items: [
+    "The Table has a new 'Next' column showing the upcoming occurrence date for recurring tasks (click the header to sort by it).",
+  ] },
+  { v: "2.2", date: "2026-08-07", items: [
+    "Overdue cleanup now has a 'Skip recurring' toggle (on by default), so batch moves only touch one-off tasks and never shift a recurring task off its schedule.",
+  ] },
   { v: "2.1", date: "2026-08-07", items: [
     "Dashboard headline now shows an undated count — tap it to set dates on tasks that were missing from every date view.",
     "Overdue cleanup now has batch actions: move all to Today or Next week, or mark them all done at once (with a confirm).",
@@ -1810,8 +1816,11 @@ function TriageModal({ items, onDone, onReschedule, onDrop, onClose }) {
   const [i, setI] = useState(0);
   const [picking, setPicking] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
-  const batchReschedule = (days) => { const iso = toISO(addDays(today(), days)); items.forEach((it) => onReschedule(it.id, iso)); onClose(); };
-  const batchComplete = () => { if (!confirmAll) { setConfirmAll(true); return; } items.forEach((it) => onDone(it.id)); onClose(); };
+  const [skipRecurring, setSkipRecurring] = useState(true);
+  const targets = skipRecurring ? items.filter((it) => !it.recurrence) : items;
+  const recurringCount = items.filter((it) => it.recurrence).length;
+  const batchReschedule = (days) => { const iso = toISO(addDays(today(), days)); targets.forEach((it) => onReschedule(it.id, iso)); onClose(); };
+  const batchComplete = () => { if (!confirmAll) { setConfirmAll(true); return; } targets.forEach((it) => onDone(it.id)); onClose(); };
   if (!items || items.length === 0) return null;
   const t = items[i];
   const advance = () => { setPicking(false); if (i + 1 >= items.length) onClose(); else setI(i + 1); };
@@ -1821,10 +1830,11 @@ function TriageModal({ items, onDone, onReschedule, onDrop, onClose }) {
     <div style={S.overlay} onClick={onClose}>
       <div style={S.modal} onClick={(e) => e.stopPropagation()}>
         <div style={S.triageBatch}>
-          <span style={S.triageBatchLabel}>All {items.length} overdue:</span>
+          <span style={S.triageBatchLabel}>Batch {targets.length}:</span>
           <button style={S.triageBatchBtn} className="helm-mini" onClick={() => batchReschedule(0)}>→ Today</button>
           <button style={S.triageBatchBtn} className="helm-mini" onClick={() => batchReschedule(7)}>→ Next week</button>
-          <button style={{ ...S.triageBatchBtn, ...(confirmAll ? { background: "#DC2626", color: "#fff", borderColor: "#DC2626" } : {}) }} className="helm-mini" onClick={batchComplete}>{confirmAll ? `Confirm — complete all ${items.length}` : "Mark all done"}</button>
+          <button style={{ ...S.triageBatchBtn, ...(confirmAll ? { background: "#DC2626", color: "#fff", borderColor: "#DC2626" } : {}) }} className="helm-mini" onClick={batchComplete}>{confirmAll ? `Confirm — complete ${targets.length}` : "Mark all done"}</button>
+          <label style={S.triageSkip}><input type="checkbox" checked={skipRecurring} onChange={(e) => { setSkipRecurring(e.target.checked); setConfirmAll(false); }} style={{ marginRight: 5 }} />Skip recurring{recurringCount > 0 ? ` (${recurringCount} kept)` : ""}</label>
         </div>
         <div style={S.triageProgress}>Or one at a time · {i + 1} of {items.length}</div>
         <h2 style={S.modalTitle}>{t.title}</h2>
@@ -1890,9 +1900,9 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
   const ql = q.trim().toLowerCase();
   const base = tasks.filter((t) => (status === "all" ? true : status === "completed" ? t.completed : !t.completed) && (!repeatOnly || !!t.recurrence) && (!noDateOnly || !t.dueDate));
   const filtered = ql ? base.filter((t) => [t.title, t.area, t.subArea || "", t.stores.join(" "), t.notes || "", t.recurrence ? recurLabel(t.recurrence) : "", (t.subtasks || []).map((sx) => sx.text).join(" ")].join(" ").toLowerCase().includes(ql)) : base;
-  const cols = [["title", "Task"], ["area", "Area"], ["sub", "Sub-area"], ["due", "Due"], ["stores", "Stores"], ["repeat", "Repeat"]];
+  const cols = [["title", "Task"], ["area", "Area"], ["sub", "Sub-area"], ["due", "Due"], ["stores", "Stores"], ["repeat", "Repeat"], ["next", "Next"]];
   const toggleSort = (k) => { if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc")); else { setSortKey(k); setSortDir("asc"); } };
-  const getVal = (t, k) => k === "title" ? t.title.toLowerCase() : k === "area" ? t.area.toLowerCase() : k === "sub" ? (t.subArea || "").toLowerCase() : k === "due" ? (t.dueDate || "9999-99-99") : k === "stores" ? (t.stores.join(",").toLowerCase() || "zzzz") : (t.recurrence ? recurLabel(t.recurrence).toLowerCase() : "zzzz");
+  const getVal = (t, k) => k === "title" ? t.title.toLowerCase() : k === "area" ? t.area.toLowerCase() : k === "sub" ? (t.subArea || "").toLowerCase() : k === "due" ? (t.dueDate || "9999-99-99") : k === "stores" ? (t.stores.join(",").toLowerCase() || "zzzz") : k === "next" ? (t.recurrence && t.dueDate ? (forecastOccurrences(t, 1)[0] || "9999-99-99") : "9999-99-99") : (t.recurrence ? recurLabel(t.recurrence).toLowerCase() : "zzzz");
   const sorted = [...filtered].sort((a, b) => { const va = getVal(a, sortKey), vb = getVal(b, sortKey); const cmp = va < vb ? -1 : va > vb ? 1 : 0; return sortDir === "asc" ? cmp : -cmp; });
   return (
     <div className="helm-scroll" style={S.scroll}>
@@ -1935,6 +1945,7 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
                     <td style={S.td}><input type="date" value={t.dueDate || ""} onChange={(e) => onUpdate(t.id, { dueDate: e.target.value || null })} style={{ ...S.tblField, minWidth: 132 }} className="helm-input helm-cell" /></td>
                     <td style={S.td}><TableStoresCell task={t} onUpdate={onUpdate} /></td>
                     <td style={S.td}><TableRepeatCell task={t} onUpdate={onUpdate} /></td>
+                    <td style={S.td}>{t.recurrence && t.dueDate ? (() => { const nx = forecastOccurrences(t, 1)[0]; return nx ? <span style={S.tblNext}>{fmtSeq(nx)}</span> : <span style={S.tblDash}>—</span>; })() : <span style={S.tblDash}>—</span>}</td>
                   </tr>
                 );
               })}
@@ -2040,6 +2051,9 @@ const S = {
   triageBatch: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, padding: "10px 12px", background: "#F7F8FA", border: "1px solid #ECEEF3", borderRadius: 10, marginBottom: 14 },
   triageBatchLabel: { fontSize: 12.5, fontWeight: 700, color: "#5B6472", marginRight: 2 },
   triageBatchBtn: { border: "1px solid #E0E3E9", background: "#fff", color: "#3A424E", borderRadius: 8, padding: "5px 11px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: FONT },
+  triageSkip: { display: "flex", alignItems: "center", fontSize: 12, fontWeight: 600, color: "#5B6472", cursor: "pointer", marginLeft: 2 },
+  tblNext: { fontSize: 13, color: "#5B6472", fontWeight: 500, whiteSpace: "nowrap" },
+  tblDash: { color: "#CDD2DA" },
   statOver: { color: "#DC2626" },
   statDim: { color: "#9AA1AC", fontWeight: 500 },
   quickWrap: { display: "flex", gap: 10, marginBottom: 6 },
