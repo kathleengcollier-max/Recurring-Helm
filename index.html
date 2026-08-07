@@ -95,6 +95,7 @@ const nextFirstBusinessDay = (from) => { const f = startOfDay(from); let v = fir
 const nextLastBusinessDay = (from) => { const f = startOfDay(from); let v = lastBusinessDay(f.getFullYear(), f.getMonth()); if (v < f) { const nx = addMonths(new Date(f.getFullYear(), f.getMonth(), 1), 1); v = lastBusinessDay(nx.getFullYear(), nx.getMonth()); } return v; };
 const fmtShort = (iso) => { const d = fromISO(iso); return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`; };
 const fmtLong = (iso) => { const d = fromISO(iso); return `${WEEKDAYS_SHORT[d.getDay()]}, ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`; };
+const fmtLongY = (iso) => { const d = fromISO(iso); return `${WEEKDAYS_SHORT[d.getDay()]}, ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; };
 const relDay = (iso) => {
   const n = diffDays(fromISO(iso), today());
   if (n === 0) return "Today";
@@ -482,6 +483,16 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
+const VERSION = "2.0";
+const CHANGELOG = [
+  { v: "2.0", date: "2026-08-07", items: [
+    "Helm now runs as a cloud app with durable storage that syncs across your devices.",
+    "Due dates now show the year — on the dashboard and on the task card.",
+    "Table has new filter pills: Repeats (recurring only) and No date (undated only).",
+    "Added this version number and What's New page, so it's easy to tell you're on the latest build.",
+    "Added a Sign out button to the sidebar.",
+  ] },
+];
 
 function Helm() {
   const [tasks, setTasks] = useState([]);
@@ -504,6 +515,9 @@ function Helm() {
   const [triage, setTriage] = useState(null);
   const [emailTask, setEmailTask] = useState(null);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [whatsNew, setWhatsNew] = useState(false);
+  useEffect(() => { (async () => { try { const r = await window.storage.get("helm:seenVersion"); if (!r || r.value !== VERSION) setWhatsNew(true); } catch (e) {} })(); }, []);
+  const dismissWhatsNew = () => { setWhatsNew(false); try { window.storage.set("helm:seenVersion", VERSION); } catch (e) {} };
   const [todayOrder, setTodayOrder] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
   const saveTimer = useRef(null);
@@ -859,7 +873,7 @@ function Helm() {
     <div style={S.app}>
       <StyleTag />
       <aside className="helm-side" style={S.side}>
-        <div style={S.brand}><div style={S.brandMark}>Helm</div><div style={S.brandSub}>What's on deck today</div></div>
+        <div style={S.brand}><div style={S.brandMark}>Helm <button onClick={() => setWhatsNew(true)} style={S.verChip} title="What's new">v{VERSION}</button></div><div style={S.brandSub}>What's on deck today</div></div>
         <div style={S.searchWrap}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks…" style={S.searchInput} className="helm-input" />
           {search && <button onClick={() => setSearch("")} style={S.searchClear} title="Clear search">✕</button>}
@@ -904,6 +918,7 @@ function Helm() {
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImport} />
         </div>
         <button onClick={() => setConfirm({ title: "Reset to demo data?", message: "This replaces ALL your tasks, templates, and history with the sample data. A safety snapshot of your current data is saved first, so you can restore it from Snapshots.", confirmLabel: "Reset everything", danger: true, onConfirm: () => { pushSnapshot("before reset"); resetAll(); } })} style={S.reset} title="Replace everything with sample data (snapshot saved first)">Reset to demo</button>
+        <button onClick={() => window.helmSignOut && window.helmSignOut()} style={{ marginTop: 10, border: "1px solid #E6E9EE", background: "#fff", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, color: "#5B6472", cursor: "pointer", fontFamily: FONT, width: "100%" }} title="Sign out of Helm">Sign out</button>
       </aside>
 
       <main style={S.main}>{search.trim() ? <SearchView query={search} tasks={tasks} onOpen={setSelected} onComplete={complete} onReschedule={reschedule} onEmail={setEmailTask} /> : <>
@@ -929,6 +944,7 @@ function Helm() {
       {emailTask && <EmailModal task={emailTask} onClose={() => setEmailTask(null)} onNotice={setNotice} />}
 
       {briefOpen && <BriefModal dueToday={dueToday} overdue={overdue} thisWeek={thisWeek} onClose={() => setBriefOpen(false)} onNotice={setNotice} />}
+      {whatsNew && <WhatsNewModal onClose={dismissWhatsNew} />}
 
       {notice && (
         <div className="helm-notice" style={{ ...S.notice, ...(notice.type === "block" ? S.noticeBlock : S.noticeOk) }}>
@@ -1072,7 +1088,7 @@ function TaskRow({ task, onOpen, onComplete, onReschedule, onEmail, overdue, sho
       {task.recurrence && task.lastCompleted && <span style={S.metaDim}>· last done {fmtShort(task.lastCompleted)}</span>}
       {task.subtasks.length > 0 && <span style={{ ...S.metaDim, ...(hasOpenSubs ? {} : { color: a.color }) }}>{doneCount}/{task.subtasks.length}</span>}
       {task.stores.map((s) => <span key={s} style={S.storeTag}>{s}</span>)}
-      {showFullDate && task.dueDate && <span style={S.metaDate}>{fmtLong(task.dueDate)}</span>}
+      {showFullDate && task.dueDate && <span style={S.metaDate}>{fmtLongY(task.dueDate)}</span>}
       {showDate && !showFullDate && task.dueDate && <span style={S.metaDim}>{relDay(task.dueDate)}</span>}
       {overdue && task.dueDate && <span style={S.overTag}>{fmtShort(task.dueDate)} · {relDay(task.dueDate)}</span>}
     </div>
@@ -1376,7 +1392,7 @@ function TaskDrawer({ task, onClose, onSave, onDelete, onDuplicate, onSkip, onCo
           {(() => { const due = t.dueDate; const od = due && fromISO(due) < today() && !t.completed; return (
             <div style={S.dueLine}>
               <SecIcon kind="cal" color={od ? "#DC2626" : "#8A92A0"} />
-              <span style={{ color: od ? "#DC2626" : "#3A424E", fontWeight: od ? 700 : 600 }}>{due ? `${relDay(due)} · ${fmtLong(due)}` : "No due date"}</span>
+              <span style={{ color: od ? "#DC2626" : "#3A424E", fontWeight: od ? 700 : 600 }}>{due ? `${relDay(due)} · ${fmtLongY(due)}` : "No due date"}</span>
               {t.recurrence && <span style={{ color: "#9AA1AC" }}>· ↻ {recurLabel(t.recurrence)}</span>}
             </div>
           ); })()}
@@ -1669,6 +1685,26 @@ function BriefModal({ dueToday, overdue, thisWeek, onClose, onNotice }) {
   );
 }
 
+function WhatsNewModal({ onClose }) {
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 460 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={S.modalTitle}>What's new</h2>
+        <div style={S.modalSub}>Helm v{VERSION}</div>
+        <div style={{ maxHeight: 360, overflowY: "auto", marginTop: 6 }} className="helm-scroll">
+          {CHANGELOG.map((c) => (
+            <div key={c.v} style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}><span style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700, color: "#14181F" }}>v{c.v}</span><span style={{ fontSize: 12, color: "#9AA1AC" }}>{c.date}</span></div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>{c.items.map((it, i) => <li key={i} style={{ fontSize: 13.5, color: "#3A424E", marginBottom: 4, lineHeight: 1.4 }}>{it}</li>)}</ul>
+            </div>
+          ))}
+        </div>
+        <div style={S.modalBtns}><button onClick={onClose} style={S.btnPrimary} className="helm-primary">Got it</button></div>
+      </div>
+    </div>
+  );
+}
+
 function RecapModal({ text, onClose }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
@@ -1835,8 +1871,10 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
   const [sortDir, setSortDir] = useState("asc");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("open");
+  const [repeatOnly, setRepeatOnly] = useState(false);
+  const [noDateOnly, setNoDateOnly] = useState(false);
   const ql = q.trim().toLowerCase();
-  const base = tasks.filter((t) => status === "all" ? true : status === "completed" ? t.completed : !t.completed);
+  const base = tasks.filter((t) => (status === "all" ? true : status === "completed" ? t.completed : !t.completed) && (!repeatOnly || !!t.recurrence) && (!noDateOnly || !t.dueDate));
   const filtered = ql ? base.filter((t) => [t.title, t.area, t.subArea || "", t.stores.join(" "), t.notes || "", t.recurrence ? recurLabel(t.recurrence) : "", (t.subtasks || []).map((sx) => sx.text).join(" ")].join(" ").toLowerCase().includes(ql)) : base;
   const cols = [["title", "Task"], ["area", "Area"], ["sub", "Sub-area"], ["due", "Due"], ["stores", "Stores"], ["repeat", "Repeat"]];
   const toggleSort = (k) => { if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc")); else { setSortKey(k); setSortDir("asc"); } };
@@ -1851,10 +1889,12 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search this table — title, notes, area, stores…" style={{ ...S.input, maxWidth: 420 }} className="helm-input" />
           {ql && <span style={{ fontSize: 13, color: "#9AA1AC" }}>{sorted.length} match{sorted.length === 1 ? "" : "es"}</span>}
           {ql && <button onClick={() => setQ("")} style={S.dataBtn} className="helm-mini">Clear</button>}
-          <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
             {[["open", "Open"], ["completed", "Completed"], ["all", "All"]].map(([k, label]) => (
               <button key={k} onClick={() => setStatus(k)} style={{ ...S.filterChip, ...(status === k ? S.filterChipOn : {}) }}>{label}</button>
             ))}
+            <button onClick={() => setRepeatOnly((v) => !v)} style={{ ...S.filterChip, ...(repeatOnly ? S.filterChipOn : {}) }} title="Only repeating tasks">↻ Repeats</button>
+            <button onClick={() => setNoDateOnly((v) => !v)} style={{ ...S.filterChip, ...(noDateOnly ? S.filterChipOn : {}) }} title="Only tasks with no due date">No date</button>
           </div>
         </div>
       </header>
@@ -2018,6 +2058,7 @@ const S = {
   cellPop: { position: "absolute", top: 32, left: 0, zIndex: 30, background: "#fff", border: "1px solid #E6E9EE", borderRadius: 11, boxShadow: "0 10px 30px rgba(20,24,31,.16)", padding: 8, width: 210 },
   filterChip: { border: "1px solid #E0E3E9", background: "#fff", color: "#5B6472", borderRadius: 9, padding: "6px 15px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT },
   filterChipOn: { background: "#14181F", color: "#fff", borderColor: "#14181F" },
+  verChip: { border: "1px solid #E0E3E9", background: "#fff", color: "#5B6472", borderRadius: 20, padding: "1px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT, verticalAlign: "middle" },
   navSection: { fontSize: 10.5, fontWeight: 700, color: "#B4BAC3", textTransform: "uppercase", letterSpacing: 0.7, padding: "12px 12px 5px" },
   navSectionToggle: { display: "flex", alignItems: "center", width: "100%", border: "none", background: "transparent", cursor: "pointer", fontFamily: FONT, fontSize: 10.5, fontWeight: 700, color: "#B4BAC3", textTransform: "uppercase", letterSpacing: 0.7, padding: "12px 12px 5px" },
   storeTag: { fontSize: 10.5, fontWeight: 700, color: "#5B6472", background: "#EEF0F4", borderRadius: 5, padding: "1px 6px" },
