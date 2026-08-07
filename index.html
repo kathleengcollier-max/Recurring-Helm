@@ -483,8 +483,12 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = "2.0";
+const VERSION = "2.1";
 const CHANGELOG = [
+  { v: "2.1", date: "2026-08-07", items: [
+    "Dashboard headline now shows an undated count — tap it to set dates on tasks that were missing from every date view.",
+    "Overdue cleanup now has batch actions: move all to Today or Next week, or mark them all done at once (with a confirm).",
+  ] },
   { v: "2.0", date: "2026-08-07", items: [
     "Helm now runs as a cloud app with durable storage that syncs across your devices.",
     "Due dates now show the year — on the dashboard and on the task card.",
@@ -997,6 +1001,7 @@ function Dashboard({ quick, setQuick, quickAdd, quickFeedback, onQuickRename, on
               {overdue.length > 0 && <span style={S.statOver}>{overdue.length} overdue</span>}
               <span>{dueToday.length} due today</span>
               <span style={S.statDim}>· {thisWeek.length} this week</span>
+              {undated.length > 0 && <span onClick={() => setUndatedExpanded(true)} style={S.statUndated} title="Tasks with no due date — click to set dates">· {undated.length} undated</span>}
               <span style={S.statDim}>· {totalTasks} open total</span>
             </div>
           </div>
@@ -1804,6 +1809,9 @@ function SearchView({ query, tasks, onOpen, onComplete, onReschedule, onEmail })
 function TriageModal({ items, onDone, onReschedule, onDrop, onClose }) {
   const [i, setI] = useState(0);
   const [picking, setPicking] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const batchReschedule = (days) => { const iso = toISO(addDays(today(), days)); items.forEach((it) => onReschedule(it.id, iso)); onClose(); };
+  const batchComplete = () => { if (!confirmAll) { setConfirmAll(true); return; } items.forEach((it) => onDone(it.id)); onClose(); };
   if (!items || items.length === 0) return null;
   const t = items[i];
   const advance = () => { setPicking(false); if (i + 1 >= items.length) onClose(); else setI(i + 1); };
@@ -1812,7 +1820,13 @@ function TriageModal({ items, onDone, onReschedule, onDrop, onClose }) {
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={S.modal} onClick={(e) => e.stopPropagation()}>
-        <div style={S.triageProgress}>Overdue {i + 1} of {items.length}</div>
+        <div style={S.triageBatch}>
+          <span style={S.triageBatchLabel}>All {items.length} overdue:</span>
+          <button style={S.triageBatchBtn} className="helm-mini" onClick={() => batchReschedule(0)}>→ Today</button>
+          <button style={S.triageBatchBtn} className="helm-mini" onClick={() => batchReschedule(7)}>→ Next week</button>
+          <button style={{ ...S.triageBatchBtn, ...(confirmAll ? { background: "#DC2626", color: "#fff", borderColor: "#DC2626" } : {}) }} className="helm-mini" onClick={batchComplete}>{confirmAll ? `Confirm — complete all ${items.length}` : "Mark all done"}</button>
+        </div>
+        <div style={S.triageProgress}>Or one at a time · {i + 1} of {items.length}</div>
         <h2 style={S.modalTitle}>{t.title}</h2>
         <div style={S.modalSub}><span style={{ ...S.areaTag, color: a.color, background: a.soft }}>{t.subArea || t.area}</span> {t.dueDate ? ` · due ${relDay(t.dueDate)}` : ""}{(t.stores || []).length ? ` · ${t.stores.join(", ")}` : ""}</div>
         <div style={S.triageBtns}>
@@ -2021,7 +2035,11 @@ const S = {
   eyebrow: { fontSize: 12.5, fontWeight: 600, color: "#8A92A0", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
   h1: { fontFamily: DISPLAY, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, lineHeight: 1.05 },
   subhead: { fontSize: 14.5, color: "#5B6472", marginTop: 8, maxWidth: 620, lineHeight: 1.5 },
-  headStat: { display: "flex", gap: 10, marginTop: 12, fontSize: 14, fontWeight: 600, color: "#14181F", alignItems: "center" },
+  headStat: { display: "flex", gap: 10, marginTop: 12, fontSize: 14, fontWeight: 600, color: "#14181F", alignItems: "center", flexWrap: "wrap" },
+  statUndated: { color: "#B45309", fontWeight: 600, cursor: "pointer" },
+  triageBatch: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, padding: "10px 12px", background: "#F7F8FA", border: "1px solid #ECEEF3", borderRadius: 10, marginBottom: 14 },
+  triageBatchLabel: { fontSize: 12.5, fontWeight: 700, color: "#5B6472", marginRight: 2 },
+  triageBatchBtn: { border: "1px solid #E0E3E9", background: "#fff", color: "#3A424E", borderRadius: 8, padding: "5px 11px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: FONT },
   statOver: { color: "#DC2626" },
   statDim: { color: "#9AA1AC", fontWeight: 500 },
   quickWrap: { display: "flex", gap: 10, marginBottom: 6 },
