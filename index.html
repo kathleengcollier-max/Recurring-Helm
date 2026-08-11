@@ -475,6 +475,12 @@ function forecastOccurrences(task, n = 2) {
   }
   return out;
 }
+function findDuplicates(list) {
+  const norm = (str) => (str || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  const map = {};
+  list.forEach((t) => { if (t.completed) return; const k = norm(t.title); if (!k) return; (map[k] = map[k] || []).push(t); });
+  return Object.values(map).filter((arr) => arr.length >= 2).map((arr) => ({ title: arr[0].title, tasks: arr })).sort((x, y) => y.tasks.length - x.tasks.length);
+}
 const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear() === today().getFullYear(); return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}${sameYr ? "" : ", " + d.getFullYear()}`; };
 
 /* ============================================================
@@ -483,8 +489,18 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = "2.4";
+const VERSION = "2.7";
 const CHANGELOG = [
+  { v: "2.7", date: "2026-08-07", items: [
+    "Mobile-friendly pass: on phones the sidebar becomes a slide-in menu (tap the ☰ button), the dashboard stacks to a single column, the task panel goes full-screen, and spacing and headings adapt to small screens.",
+  ] },
+  { v: "2.6", date: "2026-08-07", items: [
+    "New 'Duplicates' review in the sidebar Data section — groups open tasks that share a title so you can keep one and delete the rest. Deletes are undoable, and the count updates live.",
+  ] },
+  { v: "2.5", date: "2026-08-07", items: [
+    "Areas view now shows the relative day and the full date together (e.g. 'Today · Fri, Jun 30, 2026'), with overdue in red.",
+    "Areas cards fit more per row and no longer get clipped — tighter columns, cards can shrink, and a horizontal scrollbar appears if ever needed.",
+  ] },
   { v: "2.4", date: "2026-08-07", items: [
     "The Areas view now shows each task's full due date (with year), instead of only a relative label.",
   ] },
@@ -528,6 +544,8 @@ function Helm() {
   const [triage, setTriage] = useState(null);
   const [emailTask, setEmailTask] = useState(null);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
   const [whatsNew, setWhatsNew] = useState(false);
   useEffect(() => { (async () => { try { const r = await window.storage.get("helm:seenVersion"); if (!r || r.value !== VERSION) setWhatsNew(true); } catch (e) {} })(); }, []);
   const dismissWhatsNew = () => { setWhatsNew(false); try { window.storage.set("helm:seenVersion", VERSION); } catch (e) {} };
@@ -861,6 +879,7 @@ function Helm() {
 
 
   const active = useMemo(() => tasks, [tasks]);
+  const dupGroups = useMemo(() => findDuplicates(active), [active]);
   const visible = useMemo(() => storeFilter ? active.filter((t) => t.stores.includes(storeFilter)) : active, [active, storeFilter]);
   const dueToday = visible.filter((t) => !t.completed && t.dueDate && diffDays(fromISO(t.dueDate), today()) === 0);
   const overdue = visible.filter((t) => !t.completed && t.dueDate && fromISO(t.dueDate) < today()).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
@@ -869,7 +888,7 @@ function Helm() {
   const storeAware = ["dashboard", "today", "areas", "calendar", "table"].includes(view);
   const todayList = useMemo(() => { const order = todayOrder || []; const idx = (id) => { const i = order.indexOf(id); return i === -1 ? 9999 : i; }; return [...dueToday].sort((a, b) => (idx(a.id) - idx(b.id)) || (a.createdAt || "").localeCompare(b.createdAt || "")); }, [dueToday, todayOrder]);
   const navItem = (k, label) => (
-    <button key={k} onClick={() => { setView(k); setSearch(""); }} className="helm-nav" style={{ ...S.navItem, ...(view === k ? S.navItemActive : {}) }}>
+    <button key={k} onClick={() => { setView(k); setSearch(""); setMobileNav(false); }} className="helm-nav" style={{ ...S.navItem, ...(view === k ? S.navItemActive : {}) }}>
       {label}
       {k === "review" && weekDone > 0 && <span style={{ ...S.navBadge, background: "#15A34A" }}>{weekDone}</span>}
     </button>
@@ -884,8 +903,10 @@ function Helm() {
 
   return (
     <div style={S.app}>
+      <button className="helm-hamburger" onClick={() => setMobileNav(true)} aria-label="Open menu">☰</button>
+      {mobileNav && <div className="helm-backdrop" onClick={() => setMobileNav(false)} />}
       <StyleTag />
-      <aside className="helm-side" style={S.side}>
+      <aside className={"helm-side" + (mobileNav ? " helm-side-open" : "")} style={S.side}>
         <div style={S.brand}><div style={S.brandMark}>Helm <button onClick={() => setWhatsNew(true)} style={S.verChip} title="What's new">v{VERSION}</button></div><div style={S.brandSub}>What's on deck today</div></div>
         <div style={S.searchWrap}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks…" style={S.searchInput} className="helm-input" />
@@ -924,6 +945,7 @@ function Helm() {
             <button onClick={() => setSnapModal(true)} style={S.dataBtn} className="helm-mini">Snapshots</button>
             <button onClick={downloadTemplate} style={S.dataBtn} className="helm-mini">Excel template</button>
             <button onClick={() => importRef.current && importRef.current.click()} style={S.dataBtn} className="helm-mini">Import</button>
+            <button onClick={() => setDupOpen(true)} style={S.dataBtn} className="helm-mini">Duplicates{dupGroups.length ? ` (${dupGroups.length})` : ""}</button>
             <button onClick={() => setConfirm({ title: "Clear ALL data?", message: "This wipes every task, template, and history entry so you can start completely fresh. A safety snapshot is saved first, and you can undo right after.", confirmLabel: "Clear everything", danger: true, onConfirm: clearAll })} style={{ ...S.dataBtn, color: "#DC2626", borderColor: "#F1D5D5" }} className="helm-mini">Clear all</button>
           </div>
           <div style={S.storeNote}>{lastBackup ? `Last backup: ${relDay(lastBackup)}` : "No download backup yet"}</div>
@@ -934,7 +956,7 @@ function Helm() {
         <button onClick={() => window.helmSignOut && window.helmSignOut()} style={{ marginTop: 10, border: "1px solid #E6E9EE", background: "#fff", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, color: "#5B6472", cursor: "pointer", fontFamily: FONT, width: "100%" }} title="Sign out of Helm">Sign out</button>
       </aside>
 
-      <main style={S.main}>{search.trim() ? <SearchView query={search} tasks={tasks} onOpen={setSelected} onComplete={complete} onReschedule={reschedule} onEmail={setEmailTask} /> : <>
+      <main className="helm-main" style={S.main}>{search.trim() ? <SearchView query={search} tasks={tasks} onOpen={setSelected} onComplete={complete} onReschedule={reschedule} onEmail={setEmailTask} /> : <>
         {view === "dashboard" && <Dashboard quick={quick} setQuick={setQuick} quickAdd={quickAdd} quickFeedback={quickFeedback} onQuickRename={updateField} onQuickHold={() => clearTimeout(qfTimer.current)} onQuickDismiss={() => { clearTimeout(qfTimer.current); setQuickFeedback(null); }} dueToday={dueToday} overdue={overdue} thisWeek={thisWeek} onOpen={setSelected} onComplete={complete} setView={setView} storeFilter={storeFilter} contextTasks={active} onAddSuggestion={addSuggestion} lastBackup={lastBackup} onBackup={backup} onReschedule={reschedule} onTriage={() => setTriage(overdue.slice())} onEmail={setEmailTask} onBrief={() => setBriefOpen(true)} totalTasks={tasks.filter((t) => !t.completed).length} />}
         {view === "today" && <TodayView tasks={todayList} overdue={overdue} onOpen={setSelected} onComplete={complete} onReschedule={reschedule} onEmail={setEmailTask} onReorder={setTodayOrder} onBulkComplete={bulkComplete} onBulkReschedule={bulkReschedule} onBulkDelete={bulkDelete} />}
         {view === "review" && <ReviewView log={completionLog} />}
@@ -958,6 +980,7 @@ function Helm() {
 
       {briefOpen && <BriefModal dueToday={dueToday} overdue={overdue} thisWeek={thisWeek} onClose={() => setBriefOpen(false)} onNotice={setNotice} />}
       {whatsNew && <WhatsNewModal onClose={dismissWhatsNew} />}
+      {dupOpen && <DuplicatesModal groups={dupGroups} onOpen={(id) => { setSelected(id); setDupOpen(false); }} onDelete={remove} onClose={() => setDupOpen(false)} />}
 
       {notice && (
         <div className="helm-notice" style={{ ...S.notice, ...(notice.type === "block" ? S.noticeBlock : S.noticeOk) }}>
@@ -1056,7 +1079,7 @@ function Dashboard({ quick, setQuick, quickAdd, quickFeedback, onQuickRename, on
         </div>
       )}
 
-      <div style={S.grid}>
+      <div style={S.grid} className="helm-grid">
         <Panel title="Due Today" count={dueToday.length} accent="#14181F">
           {dueToday.length === 0 ? <Empty text="Nothing due today. Steer where you like." /> : listCard("today", dueToday, { showFullDate: true })}
         </Panel>
@@ -1091,7 +1114,7 @@ function Panel({ title, count, accent, children, onTitle, wide }) {
   );
 }
 
-function TaskRow({ task, onOpen, onComplete, onReschedule, onEmail, overdue, showDate, showFullDate, selectable, selected, onToggleSelect }) {
+function TaskRow({ task, onOpen, onComplete, onReschedule, onEmail, overdue, showDate, showFullDate, showRel, selectable, selected, onToggleSelect }) {
   const a = AREAS[task.area];
   const doneCount = task.subtasks.filter((s) => s.done).length;
   const hasOpenSubs = task.subtasks.length > 0 && doneCount < task.subtasks.length;
@@ -1103,6 +1126,7 @@ function TaskRow({ task, onOpen, onComplete, onReschedule, onEmail, overdue, sho
       {task.subtasks.length > 0 && <span style={{ ...S.metaDim, ...(hasOpenSubs ? {} : { color: a.color }) }}>{doneCount}/{task.subtasks.length}</span>}
       {task.stores.map((s) => <span key={s} style={S.storeTag}>{s}</span>)}
       {showFullDate && task.dueDate && <span style={S.metaDate}>{fmtLongY(task.dueDate)}</span>}
+      {showRel && task.dueDate && (() => { const od = fromISO(task.dueDate) < today() && !task.completed; return <span style={S.metaDate}><span style={od ? { color: "#DC2626", fontWeight: 700 } : {}}>{relDay(task.dueDate)}</span> · {fmtLongY(task.dueDate)}</span>; })()}
       {showDate && !showFullDate && task.dueDate && <span style={S.metaDim}>{relDay(task.dueDate)}</span>}
       {overdue && task.dueDate && <span style={S.overTag}>{fmtShort(task.dueDate)} · {relDay(task.dueDate)}</span>}
     </div>
@@ -1155,7 +1179,7 @@ function AreasView({ tasks, onOpen, onComplete, onReschedule, onEmail, onNew, on
             <section key={area} style={{ ...S.areaCard, borderTop: `3px solid ${a.color}` }}>
               <div style={S.areaCardHead}><h2 style={S.areaCardTitle}><span style={{ ...S.dot, background: a.color }} /> {area}</h2>{!selMode && <button onClick={() => onNew(area, null)} style={S.addMini} className="helm-mini">+ Add</button>}</div>
               {a.subs.length > 0 && <div style={S.subRow}>{a.subs.map((s) => { const n = list.filter((t) => t.subArea === s).length; return <span key={s} style={S.subPill}>{s}{n ? ` ${n}` : ""}</span>; })}</div>}
-              {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showFullDate />)}
+              {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showRel />)}
             </section>
           );
         })}
@@ -1699,6 +1723,34 @@ function BriefModal({ dueToday, overdue, thisWeek, onClose, onNotice }) {
   );
 }
 
+function DuplicatesModal({ groups, onOpen, onDelete, onClose }) {
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 560 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={S.modalTitle}>Possible duplicates</h2>
+        <div style={S.modalSub}>{groups.length === 0 ? "No likely duplicates — nice and tidy." : `${groups.length} set${groups.length === 1 ? "" : "s"} of open tasks share a title. Keep one, delete the rest (deletes are undoable).`}</div>
+        {groups.length > 0 && (
+          <div style={{ maxHeight: 420, overflowY: "auto", marginTop: 8 }} className="helm-scroll">
+            {groups.map((g, gi) => (
+              <div key={gi} style={S.dupGroup}>
+                <div style={S.dupTitle}>{g.title} <span style={S.dupCount}>×{g.tasks.length}</span></div>
+                {g.tasks.map((t) => { const a = AREAS[t.area]; return (
+                  <div key={t.id} style={S.dupRow}>
+                    <span style={{ ...S.dot, background: a.color, flexShrink: 0 }} />
+                    <span style={S.dupRowMeta} onClick={() => onOpen(t.id)}>{t.subArea || t.area}{t.dueDate ? ` · ${fmtSeq(t.dueDate)}` : " · no date"}{t.recurrence ? " · ↻" : ""}</span>
+                    <button onClick={() => onDelete(t.id)} style={S.dupDel} className="helm-delete">Delete</button>
+                  </div>
+                ); })}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={S.modalBtns}><button onClick={onClose} style={S.btnPrimary} className="helm-primary">Done</button></div>
+      </div>
+    </div>
+  );
+}
+
 function WhatsNewModal({ onClose }) {
   return (
     <div style={S.overlay} onClick={onClose}>
@@ -2010,9 +2062,18 @@ function StyleTag() {
       .helm-notice { animation: noticeIn .2s ease; }
       @keyframes slideIn { from { transform: translateX(40px); opacity: .4; } to { transform: translateX(0); opacity: 1; } }
       @keyframes noticeIn { from { opacity: 0; } to { opacity: 1; } }
+      .helm-hamburger { display: none; position: fixed; top: 12px; left: 12px; z-index: 65; width: 42px; height: 42px; align-items: center; justify-content: center; background: #fff; border: 1px solid #E6E9EE; border-radius: 11px; font-size: 19px; color: #14181F; cursor: pointer; box-shadow: 0 2px 12px rgba(20,24,31,.10); }
+      .helm-backdrop { display: none; }
       @media (max-width: 860px) {
-        .helm-side { width: 100% !important; height: auto !important; flex-direction: row !important; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
-        .helm-detail { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; z-index: 50; box-shadow: -12px 0 40px rgba(20,24,31,.16); }
+        .helm-hamburger { display: flex; }
+        .helm-main { padding-top: 54px !important; }
+        .helm-side { position: fixed !important; left: 0; top: 0; bottom: 0; height: 100vh !important; width: 264px !important; transform: translateX(-100%); transition: transform .22s ease; z-index: 66; box-shadow: 4px 0 34px rgba(20,24,31,.16); }
+        .helm-side.helm-side-open { transform: translateX(0); }
+        .helm-backdrop { display: block; position: fixed; inset: 0; background: rgba(20,24,31,.42); z-index: 60; }
+        .helm-detail { position: fixed !important; inset: 0 !important; width: 100% !important; max-width: 100% !important; z-index: 80; box-shadow: -12px 0 40px rgba(20,24,31,.16); }
+        .helm-grid { grid-template-columns: 1fr !important; }
+        .helm-scroll { padding-left: 16px !important; padding-right: 16px !important; }
+        h1 { font-size: 24px !important; }
       }
       input[type=date]::-webkit-calendar-picker-indicator { cursor: pointer; }
     `}</style>
@@ -2044,7 +2105,7 @@ const S = {
   dot: { width: 9, height: 9, borderRadius: 9, flexShrink: 0, display: "inline-block" },
   reset: { marginTop: "auto", border: "1px solid #E6E9EE", background: "#fff", color: "#9AA1AC", borderRadius: 8, padding: "7px", fontSize: 12, cursor: "pointer", fontFamily: FONT, fontWeight: 500 },
   main: { flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" },
-  scroll: { overflowY: "auto", padding: "30px 36px 60px", flex: 1 },
+  scroll: { overflowY: "auto", overflowX: "auto", padding: "30px 36px 60px", flex: 1 },
   head: { marginBottom: 22 },
   eyebrow: { fontSize: 12.5, fontWeight: 600, color: "#8A92A0", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
   h1: { fontFamily: DISPLAY, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, lineHeight: 1.05 },
@@ -2057,6 +2118,12 @@ const S = {
   triageSkip: { display: "flex", alignItems: "center", fontSize: 12, fontWeight: 600, color: "#5B6472", cursor: "pointer", marginLeft: 2 },
   tblNext: { fontSize: 13, color: "#5B6472", fontWeight: 500, whiteSpace: "nowrap" },
   tblDash: { color: "#CDD2DA" },
+  dupGroup: { padding: "10px 0", borderBottom: "1px solid #F0F2F5" },
+  dupTitle: { fontSize: 14, fontWeight: 700, color: "#14181F", marginBottom: 6 },
+  dupCount: { fontSize: 12, fontWeight: 700, color: "#DC2626", marginLeft: 4 },
+  dupRow: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0" },
+  dupRowMeta: { flex: 1, fontSize: 13, color: "#5B6472", cursor: "pointer" },
+  dupDel: { border: "1px solid #F1D5D5", background: "#fff", color: "#DC2626", borderRadius: 7, padding: "3px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT, flexShrink: 0 },
   statOver: { color: "#DC2626" },
   statDim: { color: "#9AA1AC", fontWeight: 500 },
   quickWrap: { display: "flex", gap: 10, marginBottom: 6 },
@@ -2100,8 +2167,8 @@ const S = {
   overTag: { fontSize: 11.5, fontWeight: 700, color: "#DC2626" },
   empty: { fontSize: 13.5, color: "#A6ACB6", padding: "10px 8px", fontStyle: "italic" },
   moreLink: { background: "none", border: "none", color: "#0D9488", fontWeight: 600, fontSize: 13, cursor: "pointer", padding: "8px", fontFamily: FONT },
-  areaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 },
-  areaCard: { background: "#fff", border: "1px solid #E9ECF1", borderRadius: 14, padding: 16 },
+  areaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 },
+  areaCard: { background: "#fff", border: "1px solid #E9ECF1", borderRadius: 14, padding: 16, minWidth: 0 },
   areaCardHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   areaCardTitle: { fontFamily: DISPLAY, fontSize: 17, fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: 9, letterSpacing: -0.4 },
   addMini: { border: "1px solid #E0E3E9", background: "#fff", borderRadius: 7, padding: "4px 10px", fontSize: 12.5, fontWeight: 600, color: "#5B6472", cursor: "pointer", fontFamily: FONT },
