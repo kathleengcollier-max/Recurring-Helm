@@ -489,8 +489,11 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = "2.7";
+const VERSION = "2.8";
 const CHANGELOG = [
+  { v: "2.8", date: "2026-08-07", items: [
+    "Areas is now a side-scrolling board: slide horizontally through your areas with an always-visible scrollbar, and each column scrolls its own tasks.",
+  ] },
   { v: "2.7", date: "2026-08-07", items: [
     "Mobile-friendly pass: on phones the sidebar becomes a slide-in menu (tap the ☰ button), the dashboard stacks to a single column, the task panel goes full-screen, and spacing and headings adapt to small screens.",
   ] },
@@ -1171,7 +1174,7 @@ function AreasView({ tasks, onOpen, onComplete, onReschedule, onEmail, onNew, on
           <button onClick={() => selMode ? clearSel() : setSelMode(true)} style={S.selectToggle} className="helm-mini">{selMode ? "Cancel" : "Select"}</button>
         </div>
       </header>
-      <div style={S.areaGrid}>
+      <div style={S.areaGrid} className="helm-board">
         {AREA_NAMES.map((area) => {
           const a = AREAS[area];
           const list = tasks.filter((t) => t.area === area && !t.completed);
@@ -1179,7 +1182,9 @@ function AreasView({ tasks, onOpen, onComplete, onReschedule, onEmail, onNew, on
             <section key={area} style={{ ...S.areaCard, borderTop: `3px solid ${a.color}` }}>
               <div style={S.areaCardHead}><h2 style={S.areaCardTitle}><span style={{ ...S.dot, background: a.color }} /> {area}</h2>{!selMode && <button onClick={() => onNew(area, null)} style={S.addMini} className="helm-mini">+ Add</button>}</div>
               {a.subs.length > 0 && <div style={S.subRow}>{a.subs.map((s) => { const n = list.filter((t) => t.subArea === s).length; return <span key={s} style={S.subPill}>{s}{n ? ` ${n}` : ""}</span>; })}</div>}
-              {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showRel />)}
+              <div style={S.areaCardBody} className="helm-scroll">
+                {list.length === 0 ? <Empty text="No open items here." /> : list.sort((x, y) => (x.dueDate || "9").localeCompare(y.dueDate || "9")).map((t) => <TaskRow key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} onReschedule={onReschedule} onEmail={onEmail} selectable={selMode} selected={selected.includes(t.id)} onToggleSelect={toggleSel} showRel />)}
+              </div>
             </section>
           );
         })}
@@ -2064,6 +2069,10 @@ function StyleTag() {
       @keyframes noticeIn { from { opacity: 0; } to { opacity: 1; } }
       .helm-hamburger { display: none; position: fixed; top: 12px; left: 12px; z-index: 65; width: 42px; height: 42px; align-items: center; justify-content: center; background: #fff; border: 1px solid #E6E9EE; border-radius: 11px; font-size: 19px; color: #14181F; cursor: pointer; box-shadow: 0 2px 12px rgba(20,24,31,.10); }
       .helm-backdrop { display: none; }
+      .helm-board { scrollbar-width: thin; scrollbar-color: #C4CAD4 transparent; }
+      .helm-board::-webkit-scrollbar { height: 12px; }
+      .helm-board::-webkit-scrollbar-thumb { background: #C4CAD4; border-radius: 6px; border: 3px solid #F4F5F8; }
+      .helm-board::-webkit-scrollbar-track { background: transparent; }
       @media (max-width: 860px) {
         .helm-hamburger { display: flex; }
         .helm-main { padding-top: 54px !important; }
@@ -2167,8 +2176,9 @@ const S = {
   overTag: { fontSize: 11.5, fontWeight: 700, color: "#DC2626" },
   empty: { fontSize: 13.5, color: "#A6ACB6", padding: "10px 8px", fontStyle: "italic" },
   moreLink: { background: "none", border: "none", color: "#0D9488", fontWeight: 600, fontSize: 13, cursor: "pointer", padding: "8px", fontFamily: FONT },
-  areaGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 },
-  areaCard: { background: "#fff", border: "1px solid #E9ECF1", borderRadius: 14, padding: 16, minWidth: 0 },
+  areaGrid: { display: "flex", gap: 16, overflowX: "auto", overflowY: "hidden", paddingBottom: 12, alignItems: "stretch", height: "calc(100vh - 235px)", minHeight: 340 },
+  areaCard: { background: "#fff", border: "1px solid #E9ECF1", borderRadius: 14, padding: 16, flex: "0 0 300px", width: 300, display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 },
+  areaCardBody: { overflowY: "auto", overflowX: "hidden", marginTop: 4, flex: 1, minHeight: 0 },
   areaCardHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   areaCardTitle: { fontFamily: DISPLAY, fontSize: 17, fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: 9, letterSpacing: -0.4 },
   addMini: { border: "1px solid #E0E3E9", background: "#fff", borderRadius: 7, padding: "4px 10px", fontSize: 12.5, fontWeight: 600, color: "#5B6472", cursor: "pointer", fontFamily: FONT },
