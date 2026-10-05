@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Helm</title>
-<meta name="app-version" content="2.8">
+<meta name="app-version" content="2.9">
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -439,6 +439,7 @@ function nextOccurrence(task) {
   return task.dueDate;
 }
 
+const SEED_COUNT = (() => { try { return seed().length; } catch (e) { return 24; } })();
 function rollForward(tasks) {
   const now = today();
   return tasks.map((t) => {
@@ -490,8 +491,11 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "2.8";
+const VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "2.9";
 const CHANGELOG = [
+  { v: "2.9", date: "2026-10-04", items: [
+    "Data-loss safeguard: a transient blank load can no longer overwrite your real data. The app retries a failed read before showing demo data, and refuses to save an empty/seed-sized set over a populated cloud — recovering the cloud copy instead.",
+  ] },
   { v: "2.8", date: "2026-08-07", items: [
     "Areas is now a side-scrolling board: slide horizontally through your areas with an always-visible scrollbar, and each column scrolls its own tasks.",
   ] },
@@ -560,19 +564,32 @@ function Helm() {
   const qfTimer = useRef(null);
   const fileRef = useRef(null);
   const importRef = useRef(null);
+  const loadedRealRef = useRef(false);
+  const startedFromSeedRef = useRef(false);
 
   useEffect(() => {
     (async () => {
       let data = null;
-      try { if (window.storage) { const r = await window.storage.get(STORAGE_KEY); if (r && r.value) data = JSON.parse(r.value); } } catch (e) { data = null; }
+      // Read the cloud, retrying on failure/empty before we ever consider seeding —
+      // a transient miss must never let demo data overwrite real data.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        let threw = false;
+        try { if (window.storage) { const r = await window.storage.get(STORAGE_KEY); if (r && r.value) { data = JSON.parse(r.value); } } } catch (e) { threw = true; }
+        if (data && Array.isArray(data.tasks)) break;
+        // Nothing yet: if the read threw (not a confirmed-empty account), wait and retry.
+        if (!threw && attempt >= 1) break; // two clean empty reads => genuinely a fresh/empty account
+        await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
+      }
       let iTasks, iCustom, iLog, iBackup = null;
       if (data && Array.isArray(data.tasks)) {
         iTasks = rollForward(data.tasks);
         iCustom = Array.isArray(data.customTemplates) ? data.customTemplates : [];
         iLog = Array.isArray(data.completionLog) ? data.completionLog : [];
         iBackup = data.lastBackup || null;
+        loadedRealRef.current = true;
       } else {
         iTasks = rollForward(seed()); iCustom = []; iLog = seedLog();
+        startedFromSeedRef.current = true;
       }
       setTasks(iTasks); setCustomTemplates(iCustom); setCompletionLog(iLog); setLastBackup(iBackup);
       setTodayOrder(data && Array.isArray(data.todayOrder) ? data.todayOrder : []);
@@ -595,12 +612,37 @@ function Helm() {
     dataRef.current = { tasks, customTemplates, completionLog, lastBackup, todayOrder };
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      try { if (window.storage) await window.storage.set(STORAGE_KEY, JSON.stringify(dataRef.current)); } catch (e) {}
+      try {
+        if (!window.storage) return;
+        const payload = dataRef.current;
+        const writing = (payload.tasks || []).length;
+        // Safety net: if we're about to write an empty or seed-sized set and we never
+        // confirmed real data this session, verify the cloud first. If the cloud holds
+        // more, RECOVER it instead of overwriting (this is the bug that lost the 400).
+        if ((writing === 0 || (!loadedRealRef.current && writing <= SEED_COUNT))) {
+          let cloud = null;
+          try { const r = await window.storage.get(STORAGE_KEY); if (r && r.value) cloud = JSON.parse(r.value); } catch (e) { return; /* read failed — do NOT overwrite */ }
+          const cloudCount = cloud && Array.isArray(cloud.tasks) ? cloud.tasks.length : 0;
+          if (cloudCount > writing) {
+            setTasks(rollForward(cloud.tasks));
+            setCustomTemplates(Array.isArray(cloud.customTemplates) ? cloud.customTemplates : []);
+            setCompletionLog(Array.isArray(cloud.completionLog) ? cloud.completionLog : []);
+            setLastBackup(cloud.lastBackup || null);
+            setTodayOrder(Array.isArray(cloud.todayOrder) ? cloud.todayOrder : []);
+            loadedRealRef.current = true;
+            startedFromSeedRef.current = false;
+            setNotice({ type: "success", text: `Recovered ${cloud.tasks.length} tasks from the cloud — a blank load was stopped before it could overwrite your data.` });
+            return;
+          }
+        }
+        await window.storage.set(STORAGE_KEY, JSON.stringify(payload));
+        if (writing > 0) loadedRealRef.current = true;
+      } catch (e) {}
     }, 350);
   }, [tasks, customTemplates, completionLog, lastBackup, todayOrder, loaded]);
 
   useEffect(() => {
-    const flush = () => { try { if (window.storage && dataRef.current) window.storage.set(STORAGE_KEY, JSON.stringify(dataRef.current)); } catch (e) {} };
+    const flush = () => { try { if (window.storage && dataRef.current && (dataRef.current.tasks || []).length > 0) window.storage.set(STORAGE_KEY, JSON.stringify(dataRef.current)); } catch (e) {} };
     const onHide = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     window.addEventListener("pagehide", flush);
