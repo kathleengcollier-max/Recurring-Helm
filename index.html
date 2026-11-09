@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Helm</title>
-<meta name="app-version" content="2.11">
+<meta name="app-version" content="2.13">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Crect%20width%3D%2732%27%20height%3D%2732%27%20rx%3D%277%27%20fill%3D%27%2314181F%27%2F%3E%3Crect%20x%3D%279%27%20y%3D%278%27%20width%3D%274.5%27%20height%3D%2716%27%20fill%3D%27%23fff%27%2F%3E%3Crect%20x%3D%2718.5%27%20y%3D%278%27%20width%3D%274.5%27%20height%3D%2716%27%20fill%3D%27%23fff%27%2F%3E%3Crect%20x%3D%279%27%20y%3D%2713.75%27%20width%3D%2714%27%20height%3D%274.5%27%20fill%3D%27%23CC0000%27%2F%3E%3C%2Fsvg%3E" />
 <meta name="theme-color" content="#14181F" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -493,8 +493,14 @@ const fmtSeq = (iso) => { const d = fromISO(iso); const sameYr = d.getFullYear()
 
 const STORAGE_KEY = "helm:data:v2";
 const SNAP_KEY = "helm:snapshots:v1";
-const VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "2.11";
+const VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "2.13";
 const CHANGELOG = [
+  { v: "2.13", date: "2026-11-08", items: [
+    "New \u201cSplit into branch tasks\u201d action: open a task tagged to 2+ branches and split it into one independent task per branch (each named with its branch, each completing and repeating on its own). Confirms first and can be undone \u2014 for the \u2018each location does its own\u2019 case.",
+  ] },
+  { v: "2.12", date: "2026-11-08", items: [
+    "Multi-branch tasks are now clearer: a task tagged to 2+ branches shows a \u201cN branches\u201d badge, and you can filter to just those tasks \u2014 a \u201cMultiple\u201d button on the dashboard store bar and a \u201cMulti-branch\u201d pill in the Table.",
+  ] },
   { v: "2.11", date: "2026-10-21", items: [
     "Added a favicon \u2014 the Helm \u201cH\u201d now shows on the browser tab and in bookmarks.",
   ] },
@@ -713,6 +719,23 @@ function Helm() {
     return true;
   };
 
+  const splitByBranch = (id) => {
+    const t = tasks.find((x) => x.id === id);
+    if (!t || (t.stores || []).length < 2) return;
+    const brs = t.stores.slice();
+    setConfirm({
+      title: "Split into one task per branch?",
+      message: `This replaces "${t.title}" with ${brs.length} separate tasks — one each for ${brs.join(", ")}. Every copy keeps the same details, but from now on each branch's task completes and repeats on its own. You can undo right after.`,
+      confirmLabel: `Split into ${brs.length}`,
+      onConfirm: () => {
+        const clones = brs.map((sx) => ({ ...t, id: uid(), title: `${t.title} \u2014 ${sx}`, stores: [sx], completed: false, completedAt: null, lastCompleted: null, createdAt: new Date().toISOString(), subtasks: (t.subtasks || []).map((x) => ({ id: uid(), text: x.text, done: false })), links: (t.links || []).map((l) => ({ ...l })) }));
+        const cloneIds = new Set(clones.map((c) => c.id));
+        setTasks((prev) => [...prev.filter((x) => x.id !== t.id), ...clones]);
+        setSelected(null);
+        setNotice({ type: "success", text: `Split into ${clones.length} branch tasks.`, action: { label: "Undo", onClick: () => { setTasks((prev) => [...prev.filter((x) => !cloneIds.has(x.id)), t]); setNotice({ type: "success", text: `Restored "${t.title}".` }); } } });
+      },
+    });
+  };
   const duplicate = (id) => {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
@@ -948,7 +971,7 @@ function Helm() {
 
   const active = useMemo(() => tasks, [tasks]);
   const dupGroups = useMemo(() => findDuplicates(active), [active]);
-  const visible = useMemo(() => storeFilter ? active.filter((t) => t.stores.includes(storeFilter)) : active, [active, storeFilter]);
+  const visible = useMemo(() => storeFilter ? (storeFilter === "__multi__" ? active.filter((t) => (t.stores || []).length >= 2) : active.filter((t) => t.stores.includes(storeFilter))) : active, [active, storeFilter]);
   const dueToday = visible.filter((t) => !t.completed && t.dueDate && diffDays(fromISO(t.dueDate), today()) === 0);
   const overdue = visible.filter((t) => !t.completed && t.dueDate && fromISO(t.dueDate) < today()).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const thisWeek = visible.filter((t) => { if (t.completed || !t.dueDate) return false; const d = diffDays(fromISO(t.dueDate), today()); return d >= 1 && d <= 7; });
@@ -962,7 +985,7 @@ function Helm() {
     </button>
   );
   const calBase = active;
-  const calTasks = storeFilter ? calBase.filter((t) => (t.stores || []).includes(storeFilter)) : calBase;
+  const calTasks = storeFilter ? (storeFilter === "__multi__" ? calBase.filter((t) => (t.stores || []).length >= 2) : calBase.filter((t) => (t.stores || []).includes(storeFilter))) : calBase;
 
 
   const selectedTask = tasks.find((t) => t.id === selected) || null;
@@ -998,6 +1021,7 @@ function Helm() {
           <div style={S.storeWrap}>
             <button onClick={() => setStoreFilter(null)} style={{ ...S.storeChip, ...(storeFilter === null ? S.storeChipOn : {}) }}>All</button>
             {STORES.map((s) => <button key={s} onClick={() => setStoreFilter(storeFilter === s ? null : s)} style={{ ...S.storeChip, ...(storeFilter === s ? S.storeChipOn : {}) }}>{s}</button>)}
+            <button onClick={() => setStoreFilter(storeFilter === "__multi__" ? null : "__multi__")} style={{ ...S.storeChip, ...(storeFilter === "__multi__" ? S.storeChipOn : {}) }} title="Tasks tagged to 2 or more branches">Multiple</button>
           </div>
           <div style={S.storeNote}>{storeAware ? "Filters Dashboard, Areas & Calendar" : "Not used on this tab"}</div>
         </div>
@@ -1035,7 +1059,7 @@ function Helm() {
         {view === "annual" && <AnnualView tasks={tasks} onOpen={setSelected} />}
       </>}</main>
 
-      {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelected(null)} onSave={upsert} onDelete={remove} onDuplicate={duplicate} onSkip={skipOccurrence} onComplete={(id) => { const tk = tasks.find((x) => x.id === id); const ok = complete(id); if (!ok) return; const rolled = tk && tk.recurrence && tk.dueDate && !(tk.recurrence.until && fromISO(nextOccurrence(tk)) > fromISO(tk.recurrence.until)); if (!rolled) setSelected(null); }} />}
+      {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelected(null)} onSave={upsert} onDelete={remove} onDuplicate={duplicate} onSplit={splitByBranch} onSkip={skipOccurrence} onComplete={(id) => { const tk = tasks.find((x) => x.id === id); const ok = complete(id); if (!ok) return; const rolled = tk && tk.recurrence && tk.dueDate && !(tk.recurrence.until && fromISO(nextOccurrence(tk)) > fromISO(tk.recurrence.until)); if (!rolled) setSelected(null); }} />}
 
 
 
@@ -1096,7 +1120,7 @@ function Dashboard({ quick, setQuick, quickAdd, quickFeedback, onQuickRename, on
       <header style={S.head}>
         <div style={S.todayHead}>
           <div>
-            <div style={S.eyebrow}>{fmtLong(toISO(today()))}{storeFilter ? ` · ${storeFilter}` : ""}</div>
+            <div style={S.eyebrow}>{fmtLong(toISO(today()))}{storeFilter ? ` · ${storeFilter === "__multi__" ? "Multiple branches" : storeFilter}` : ""}</div>
             <h1 style={S.h1}>{greet}, Kathleen.</h1>
             <div style={S.headStat}>
               {overdue.length > 0 && <span style={S.statOver}>{overdue.length} overdue</span>}
@@ -1193,6 +1217,7 @@ function TaskRow({ task, onOpen, onComplete, onReschedule, onEmail, overdue, sho
       {task.recurrence && <span style={S.metaDim}>↻ {recurLabel(task.recurrence)}</span>}
       {task.recurrence && task.lastCompleted && <span style={S.metaDim}>· last done {fmtShort(task.lastCompleted)}</span>}
       {task.subtasks.length > 0 && <span style={{ ...S.metaDim, ...(hasOpenSubs ? {} : { color: a.color }) }}>{doneCount}/{task.subtasks.length}</span>}
+      {task.stores.length >= 2 && <span style={S.multiTag} title="Tagged to multiple branches">{task.stores.length} branches</span>}
       {task.stores.map((s) => <span key={s} style={S.storeTag}>{s}</span>)}
       {showFullDate && task.dueDate && <span style={S.metaDate}>{fmtLongY(task.dueDate)}</span>}
       {showRel && task.dueDate && (() => { const od = fromISO(task.dueDate) < today() && !task.completed; return <span style={S.metaDate}><span style={od ? { color: "#DC2626", fontWeight: 700 } : {}}>{relDay(task.dueDate)}</span> · {fmtLongY(task.dueDate)}</span>; })()}
@@ -1463,7 +1488,7 @@ function SecIcon({ kind, color }) {
   return null;
 }
 
-function TaskDrawer({ task, onClose, onSave, onDelete, onDuplicate, onSkip, onComplete }) {
+function TaskDrawer({ task, onClose, onSave, onDelete, onDuplicate, onSplit, onSkip, onComplete }) {
   const [t, setT] = useState(task);
   const [newSub, setNewSub] = useState("");
   const [newLink, setNewLink] = useState({ label: "", url: "" });
@@ -1597,6 +1622,7 @@ function TaskDrawer({ task, onClose, onSave, onDelete, onDuplicate, onSkip, onCo
           <textarea value={t.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Context, reminders, anything Future You will thank you for." style={S.textarea} className="helm-input" />
 
           </div>
+          {t.stores.length >= 2 && <button onClick={() => onSplit(t.id)} style={S.splitBtn} className="helm-mini" title="Make a separate, independent task for each tagged branch">Split into {t.stores.length} branch tasks \u2014 one per location</button>}
           <div style={S.drawerFooter}>
             <button onClick={() => onDuplicate(t.id)} style={S.dupBtn} className="helm-mini">Duplicate task</button>
             <button onClick={() => onDelete(t.id)} style={S.deleteBtn} className="helm-delete">Delete task</button>
@@ -1920,6 +1946,7 @@ function SearchView({ query, tasks, onOpen, onComplete, onReschedule, onEmail })
                     <span style={{ ...S.areaTag, color: a.color, background: a.soft }}>{t.subArea || t.area}</span>
                     {date && <span style={{ ...S.metaDim, ...(date && !t.completed && fromISO(date) < today() ? { color: "#DC2626", fontWeight: 700 } : {}) }}>{relDay(date)}</span>}
                     {t.recurrence && <span style={S.metaDim}>↻ {recurLabel(t.recurrence)}</span>}
+                    {(t.stores || []).length >= 2 && <span style={S.multiTag} title="Tagged to multiple branches">{t.stores.length} branches</span>}
                     {(t.stores || []).map((sx) => <span key={sx} style={S.storeTag}>{sx}</span>)}
                   </div>
                 </div>
@@ -2023,8 +2050,9 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
   const [status, setStatus] = useState("open");
   const [repeatOnly, setRepeatOnly] = useState(false);
   const [noDateOnly, setNoDateOnly] = useState(false);
+  const [multiOnly, setMultiOnly] = useState(false);
   const ql = q.trim().toLowerCase();
-  const base = tasks.filter((t) => (status === "all" ? true : status === "completed" ? t.completed : !t.completed) && (!repeatOnly || !!t.recurrence) && (!noDateOnly || !t.dueDate));
+  const base = tasks.filter((t) => (status === "all" ? true : status === "completed" ? t.completed : !t.completed) && (!repeatOnly || !!t.recurrence) && (!noDateOnly || !t.dueDate) && (!multiOnly || (t.stores || []).length >= 2));
   const filtered = ql ? base.filter((t) => [t.title, t.area, t.subArea || "", t.stores.join(" "), t.notes || "", t.recurrence ? recurLabel(t.recurrence) : "", (t.subtasks || []).map((sx) => sx.text).join(" ")].join(" ").toLowerCase().includes(ql)) : base;
   const cols = [["title", "Task"], ["area", "Area"], ["sub", "Sub-area"], ["due", "Due"], ["stores", "Stores"], ["repeat", "Repeat"], ["next", "Next"]];
   const toggleSort = (k) => { if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc")); else { setSortKey(k); setSortDir("asc"); } };
@@ -2045,6 +2073,7 @@ function TableView({ tasks, onOpen, onComplete, onUpdate }) {
             ))}
             <button onClick={() => setRepeatOnly((v) => !v)} style={{ ...S.filterChip, ...(repeatOnly ? S.filterChipOn : {}) }} title="Only repeating tasks">↻ Repeats</button>
             <button onClick={() => setNoDateOnly((v) => !v)} style={{ ...S.filterChip, ...(noDateOnly ? S.filterChipOn : {}) }} title="Only tasks with no due date">No date</button>
+            <button onClick={() => setMultiOnly((v) => !v)} style={{ ...S.filterChip, ...(multiOnly ? S.filterChipOn : {}) }} title="Only tasks tagged to 2 or more branches">Multi-branch</button>
           </div>
         </div>
       </header>
@@ -2239,6 +2268,8 @@ const S = {
   navSection: { fontSize: 10.5, fontWeight: 700, color: "#B4BAC3", textTransform: "uppercase", letterSpacing: 0.7, padding: "12px 12px 5px" },
   navSectionToggle: { display: "flex", alignItems: "center", width: "100%", border: "none", background: "transparent", cursor: "pointer", fontFamily: FONT, fontSize: 10.5, fontWeight: 700, color: "#B4BAC3", textTransform: "uppercase", letterSpacing: 0.7, padding: "12px 12px 5px" },
   storeTag: { fontSize: 10.5, fontWeight: 700, color: "#5B6472", background: "#EEF0F4", borderRadius: 5, padding: "1px 6px" },
+  multiTag: { fontSize: 10.5, fontWeight: 700, color: "#4350AF", background: "#EEF1FF", borderRadius: 5, padding: "1px 6px" },
+  splitBtn: { width: "100%", border: "1px solid #CBD2F5", background: "#F4F6FF", color: "#4350AF", borderRadius: 9, padding: "9px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: FONT, marginTop: 20 },
   overTag: { fontSize: 11.5, fontWeight: 700, color: "#DC2626" },
   empty: { fontSize: 13.5, color: "#A6ACB6", padding: "10px 8px", fontStyle: "italic" },
   moreLink: { background: "none", border: "none", color: "#0D9488", fontWeight: 600, fontSize: 13, cursor: "pointer", padding: "8px", fontFamily: FONT },
